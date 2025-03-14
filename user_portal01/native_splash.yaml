@@ -1,0 +1,10 @@
+flutter_native_splash:
+  android: true
+  ios: true
+  web: false
+
+  color: "#5874C6"
+  image: "assets/app_icon.png"
+  android_gravity: center
+  ios_content_mode: scaleAspectFill
+  branding: "assets/K01.png"
