@@ -37,6 +37,17 @@ dependencies:
   cupertino_icons: ^1.0.6
   flutter_native_splash: ^2.4.1
   google_fonts: ^6.2.1
+  badges: ^3.1.2
+  emoji_picker_flutter: ^4.3.0
+  flutter_emoji: ^2.5.1
+  intl: ^0.20.2
+  share_plus: ^10.1.4
+  marquee: ^2.2.3
+  file_picker: ^8.3.2
+  flutter_polls: ^0.1.6
+  image_picker: ^1.1.2
+  provider: ^6.1.2
+  theme_provider: ^0.6.0
 
 dev_dependencies:
   flutter_test:
@@ -66,6 +77,9 @@ flutter:
     - assets/google_icon.png
     - assets/Back.png
     - assets/LandingIm.png
+    - assets/Notification.png
+    - assets/profile_pic.png
+    - assets/sample_post_image.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/assets-and-images/#resolution-aware

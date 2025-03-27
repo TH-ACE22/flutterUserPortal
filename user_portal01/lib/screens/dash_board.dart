@@ -10,21 +10,29 @@ class Dashboard extends StatefulWidget {
 
 class _DashboardState extends State<Dashboard> {
   final List<Map<String, dynamic>> channels = [
-    {'name': 'Water Utilities', 'icon': Icons.water_drop, 'color': Colors.blue},
+    {
+      'name': 'Water Utilities',
+      'icon': Icons.water_drop,
+      'color': Colors.blue,
+      'route': '/waterUtilities',
+    },
     {
       'name': 'Electricity',
       'icon': Icons.electrical_services,
-      'color': Colors.yellow
+      'color': Colors.yellow,
+      'route': '/electricity',
     },
     {
       'name': 'Health Services',
       'icon': Icons.local_hospital,
-      'color': Colors.red
+      'color': Colors.red,
+      'route': '/healthServices',
     },
     {
       'name': 'Police Services',
       'icon': Icons.local_police,
-      'color': Colors.green
+      'color': Colors.green,
+      'route': '/policeServices',
     },
   ];
 
@@ -43,17 +51,27 @@ class _DashboardState extends State<Dashboard> {
     );
   }
 
-  // Only one definition of _onBottomNavTap is here:
   void _onBottomNavTap(int index) {
-    setState(() {
-      _bottomNavIndex = index;
-    });
-    // Add your navigation logic here, for example:
-    // if (index == 0) {
-    //   Navigator.pushNamed(context, '/explore');
-    // } else if (index == 1) {
-    //   Navigator.pushNamed(context, '/channels');
-    // } ...
+    if (index == 0) {
+      // Navigate to Explore (dashboard)
+      Navigator.pushNamed(context, '/dashboard');
+    } else if (index == 1) {
+      // Navigate to Channels
+      Navigator.pushNamed(context, '/channels');
+    } else if (index == 2) {
+      // Navigate to Discussions
+      Navigator.pushNamed(context, '/discussion');
+    } else if (index == 3) {
+      // Navigate to Notifications
+      Navigator.pushNamed(context, '/notifications');
+    } else if (index == 4) {
+      // Navigate to Profile
+      Navigator.pushNamed(context, '/profile');
+    } else {
+      setState(() {
+        _bottomNavIndex = index;
+      });
+    }
   }
 
   @override
@@ -106,36 +124,43 @@ class _DashboardState extends State<Dashboard> {
                         children: channels.map((channel) {
                           return Padding(
                             padding: const EdgeInsets.only(right: 12.0),
-                            child: Container(
-                              width: 126,
-                              height: 101,
-                              padding: const EdgeInsets.all(8.0),
-                              decoration: BoxDecoration(
-                                color: channel['color']!.withOpacity(0.8),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Stack(
-                                children: [
-                                  Align(
-                                    alignment: Alignment.topLeft,
-                                    child: Text(
-                                      channel['name'],
-                                      style: GoogleFonts.sora(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
+                            // Wrap with GestureDetector to handle onTap
+                            child: GestureDetector(
+                              onTap: () {
+                                // Navigate to the specified channel page.
+                                Navigator.pushNamed(context, channel['route']);
+                              },
+                              child: Container(
+                                width: 126,
+                                height: 101,
+                                padding: const EdgeInsets.all(8.0),
+                                decoration: BoxDecoration(
+                                  color: channel['color']!.withOpacity(0.8),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Stack(
+                                  children: [
+                                    Align(
+                                      alignment: Alignment.topLeft,
+                                      child: Text(
+                                        channel['name'],
+                                        style: GoogleFonts.sora(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                    Align(
+                                      alignment: Alignment.bottomRight,
+                                      child: Icon(
+                                        channel['icon'],
+                                        size: 30,
                                         color: Colors.white,
                                       ),
                                     ),
-                                  ),
-                                  Align(
-                                    alignment: Alignment.bottomRight,
-                                    child: Icon(
-                                      channel['icon'],
-                                      size: 30,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
                           );
@@ -277,8 +302,8 @@ class _DashboardState extends State<Dashboard> {
         child: BottomNavigationBar(
           backgroundColor: Colors.white,
           currentIndex: _bottomNavIndex,
-          selectedItemColor: Colors.blue, // Selected item color
-          unselectedItemColor: Colors.grey, // Unselected item color
+          selectedItemColor: Colors.blue,
+          unselectedItemColor: Colors.grey,
           selectedLabelStyle: GoogleFonts.sora(
             fontSize: 14,
             fontWeight: FontWeight.bold,

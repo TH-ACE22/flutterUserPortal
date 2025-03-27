@@ -6,11 +6,24 @@ allprojects {
 }
 
 rootProject.buildDir = "../build"
+
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
+
 subprojects {
     project.evaluationDependsOn(":app")
+}
+
+subprojects {
+    configurations.all {
+        resolutionStrategy {
+            // Force Kotlin to use a single version (Adjust based on your project)
+            force "org.jetbrains.kotlin:kotlin-stdlib:1.8.22"
+            force "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22"
+            force "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22"
+        }
+    }
 }
 
 tasks.register("clean", Delete) {
