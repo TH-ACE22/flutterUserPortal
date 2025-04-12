@@ -14,6 +14,7 @@ import 'package:user_portal01/screens/notification.dart';
 import 'package:user_portal01/screens/profile.dart';
 import 'package:user_portal01/screens/channel.dart';
 import 'package:user_portal01/screens/communities.dart';
+import 'package:flutter_easyloading/flutter_easyloading.dart';
 
 void main() {
   runApp(
@@ -52,4 +53,19 @@ class MyApp extends StatelessWidget {
       },
     );
   }
+}
+
+void configLoading() {
+  EasyLoading.instance
+    ..indicatorType = EasyLoadingIndicatorType.circle
+    ..loadingStyle = EasyLoadingStyle.custom
+    ..indicatorSize = 45.0
+    ..radius = 10.0
+    ..progressColor = Colors.black
+    ..backgroundColor = Colors.white
+    ..indicatorColor = Colors.black
+    ..textColor = Colors.black
+    ..maskColor = Colors.blue.withOpacity(0.5)
+    ..userInteractions = false
+    ..dismissOnTap = false;
 }
