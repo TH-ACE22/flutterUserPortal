@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'theme_notifier.dart'; // Make sure your ThemeNotifier is set up
 
 class ProfilePage extends StatefulWidget {
@@ -43,10 +45,18 @@ class _ProfilePageState extends State<ProfilePage> {
   // Dark mode flag.
   bool isDarkMode = false;
 
+  // Secure storage instance.
+  final _secureStorage = const FlutterSecureStorage();
+
+  // For the "Remember Me" functionality.
+  // ignore: unused_field
+  bool _rememberMe = false;
+
   @override
   void initState() {
     super.initState();
     _usernameController = TextEditingController(text: username);
+    _loadRememberedEmail();
   }
 
   @override
@@ -90,6 +100,22 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
       ),
     );
+  }
+
+  // Logout function to clear stored tokens and navigate to the login screen.
+  Future<void> _logout() async {
+    // Clear tokens from secure storage.
+    await _secureStorage.delete(key: 'jwt_token');
+    await _secureStorage.delete(key: 'refresh_token');
+
+    // Optionally, clear the "Remember Me" flag.
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('rememberMe', false);
+
+    // Navigate to the login screen and clear the navigation history.
+    if (mounted) {
+      Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+    }
   }
 
   // Build the settings section.
@@ -144,16 +170,14 @@ class _ProfilePageState extends State<ProfilePage> {
             },
           ),
           const Divider(color: Colors.white54, indent: 16, endIndent: 16),
+          // Updated Logout ListTile to use the _logout() function.
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.white),
             title: Text(
               "Logout",
               style: GoogleFonts.sora(fontSize: 16, color: Colors.white),
             ),
-            onTap: () {
-              Navigator.pushNamedAndRemoveUntil(
-                  context, '/login', (route) => false);
-            },
+            onTap: _logout,
           ),
         ],
       ),
@@ -250,7 +274,6 @@ class _ProfilePageState extends State<ProfilePage> {
                       profilePic = photo.path;
                     });
                   }
-                  // ignore: use_build_context_synchronously
                   Navigator.pop(context);
                 },
               ),
@@ -268,7 +291,6 @@ class _ProfilePageState extends State<ProfilePage> {
                       profilePic = photo.path;
                     });
                   }
-                  // ignore: use_build_context_synchronously
                   Navigator.pop(context);
                 },
               ),
@@ -285,6 +307,16 @@ class _ProfilePageState extends State<ProfilePage> {
         );
       },
     );
+  }
+
+  // Loads remembered email if available.
+  Future<void> _loadRememberedEmail() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('rememberMe') ?? false) {
+      setState(() {
+        _rememberMe = true;
+      });
+    }
   }
 
   @override
@@ -348,7 +380,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 const SizedBox(height: 24),
                 // User details Card.
                 Card(
-                  color: isDarkMode ? Colors.black54 : Colors.black45,
+                  color: Colors.black45,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),

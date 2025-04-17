@@ -49,6 +49,7 @@ dependencies:
   provider: ^6.1.2
   theme_provider: ^0.6.0
   flutter_easyloading: ^3.0.5
+  flutter_secure_storage: ^9.2.4
 
 dev_dependencies:
   flutter_test:
