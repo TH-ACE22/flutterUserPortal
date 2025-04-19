@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:user_portal01/screens/community_selection.dart';
 import 'package:user_portal01/screens/discussion_page.dart';
 import 'theme_notifier.dart';
 import 'package:user_portal01/screens/landing_page.dart';
@@ -13,6 +14,7 @@ import 'package:user_portal01/screens/health_services_channel.dart';
 import 'package:user_portal01/police_channel.dart';
 import 'package:user_portal01/screens/notification.dart';
 import 'package:user_portal01/screens/profile.dart';
+import 'package:user_portal01/screens/community_preview.dart';
 
 import 'package:user_portal01/screens/channel.dart';
 import 'package:user_portal01/screens/communities.dart';
@@ -52,6 +54,8 @@ class MyApp extends StatelessWidget {
         '/profile': (context) => const ProfilePage(),
         '/communities': (context) => const CommunitiesPage(),
         '/notification': (context) => const NotificationPage(),
+        '/community': (context) => const CommunitySelectionPage(),
+        '/community-preview': (context) => const CommunityPreviewPage(),
       },
     );
   }
