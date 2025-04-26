@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:user_portal01/utility/http_with_refresh.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:google_fonts/google_fonts.dart';
+// ignore: unused_import
 import 'package:http/http.dart' as http;
 import 'package:user_portal01/models/community_summary.dart';
 
@@ -46,8 +47,10 @@ class CommunityPreviewPage extends StatefulWidget {
 }
 
 class _CommunityPreviewPageState extends State<CommunityPreviewPage> {
+  // ignore: unused_field
   final _storage = const FlutterSecureStorage();
   static const String _baseUrl = 'http://10.0.2.2:8081';
+
   late CommunitySummary community;
   List<Channel> _channels = [];
   bool _isJoining = false;
@@ -57,6 +60,7 @@ class _CommunityPreviewPageState extends State<CommunityPreviewPage> {
   void initState() {
     super.initState();
     Future.delayed(const Duration(milliseconds: 100), () {
+      if (!mounted) return;
       setState(() => _visible = true);
     });
   }
@@ -72,6 +76,7 @@ class _CommunityPreviewPageState extends State<CommunityPreviewPage> {
     final uri = Uri.parse('$_baseUrl/communities/${community.id}/channels');
     final response = await HttpWithRefresh.get(uri);
 
+    if (!mounted) return;
     if (response.statusCode == 200) {
       final List<dynamic> data = jsonDecode(response.body);
       setState(() {
@@ -86,12 +91,23 @@ class _CommunityPreviewPageState extends State<CommunityPreviewPage> {
   }
 
   Future<void> joinCommunity() async {
+    if (!mounted) return;
     setState(() => _isJoining = true);
+
     final uri = Uri.parse('$_baseUrl/communities/${community.id}/join');
     final response = await HttpWithRefresh.post(uri);
 
+    if (!mounted) return;
     setState(() => _isJoining = false);
+
     if (response.statusCode == 200) {
+      // ✅ Save community ID and name
+      const storage = FlutterSecureStorage();
+      await storage.write(key: 'selected_community_id', value: community.id);
+      await storage.write(
+          key: 'selected_community_name', value: community.name);
+
+      // ✅ Navigate to dashboard
       Navigator.pushReplacementNamed(
         context,
         '/dashboard',
@@ -103,7 +119,8 @@ class _CommunityPreviewPageState extends State<CommunityPreviewPage> {
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text('Failed to join community (${response.statusCode})')),
+          content: Text('Failed to join community (${response.statusCode})'),
+        ),
       );
     }
   }
@@ -115,7 +132,7 @@ class _CommunityPreviewPageState extends State<CommunityPreviewPage> {
         title: const Text('Join Community'),
         content: Text(
           'Are you sure you want to join "${community.name}"?',
-          style: GoogleFonts.inter(),
+          style: GoogleFonts.poppins(),
         ),
         actions: [
           TextButton(
@@ -217,30 +234,31 @@ class _CommunityPreviewPageState extends State<CommunityPreviewPage> {
                       style: GoogleFonts.poppins(
                           fontSize: 16, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
-                  _channels.isEmpty
-                      ? Card(
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                          elevation: 2,
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Text('No channels found.',
-                                style: GoogleFonts.poppins(
-                                    fontStyle: FontStyle.italic)),
-                          ),
-                        )
-                      : Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: _channels
-                              .map((c) => Chip(
-                                    label: Text(c.channelName,
-                                        style: GoogleFonts.poppins()),
-                                    backgroundColor: Colors.white,
-                                    elevation: 2,
-                                  ))
-                              .toList(),
-                        ),
+                  if (_channels.isEmpty)
+                    Card(
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      elevation: 2,
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Text('No channels found.',
+                            style: GoogleFonts.poppins(
+                                fontStyle: FontStyle.italic)),
+                      ),
+                    )
+                  else
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _channels
+                          .map((c) => Chip(
+                                label: Text(c.channelName,
+                                    style: GoogleFonts.poppins()),
+                                backgroundColor: Colors.white,
+                                elevation: 2,
+                              ))
+                          .toList(),
+                    ),
                   const SizedBox(height: 24),
                   // Join Button
                   Center(

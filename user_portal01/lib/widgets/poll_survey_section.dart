@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class PollSurveySection extends StatefulWidget {
   final Function(Map<String, String>) onPollSent;
@@ -41,14 +43,15 @@ class _PollSurveySectionState extends State<PollSurveySection> {
     });
   }
 
-  // Function to simulate sending the poll.
-  void _sendPoll(int pollIndex) {
-    widget.onPollSent(
-        {"text": polls[pollIndex]["pollText"], "status": "Ongoing"});
+  void _sendPoll(int pollIndex) async {
+    final suggestion = polls[pollIndex]["pollText"];
+    await _submitPollToBackend(suggestion); // Backend submission
+    widget.onPollSent({"text": suggestion, "status": "Ongoing"});
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'Poll "${polls[pollIndex]["pollText"]}" sent successfully!',
+          'Poll "$suggestion" sent successfully!',
           style: GoogleFonts.sora(
             color: Colors.white,
             fontWeight: FontWeight.w600,
@@ -65,6 +68,44 @@ class _PollSurveySectionState extends State<PollSurveySection> {
     setState(() {
       polls.removeAt(pollIndex);
     });
+  }
+
+  Future<void> _submitPollToBackend(String suggestionText) async {
+    const storage = FlutterSecureStorage();
+    final communityId = await storage.read(key: 'joined_community_id');
+    final channelId =
+        await storage.read(key: 'joined_channel_id'); // must be stored earlier
+    final token = await storage.read(key: 'jwt_token');
+
+    if (communityId == null || channelId == null || token == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Missing community, channel, or auth info')),
+      );
+      return;
+    }
+
+    final uri = Uri.parse('http://10.0.2.2:8081/api/v1/polls/suggest');
+    final response = await http.post(
+      uri,
+      headers: {
+        'Authorization': 'Bearer $token',
+      },
+      body: {
+        'text': suggestionText,
+        'communityId': communityId,
+        'channelId': channelId,
+      },
+    );
+
+    if (response.statusCode == 200) {
+      debugPrint('✅ Poll suggestion submitted: ${response.body}');
+    } else {
+      debugPrint('❌ Submission failed: ${response.statusCode}');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to submit suggestion to server')),
+      );
+    }
   }
 
   @override

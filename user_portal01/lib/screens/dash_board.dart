@@ -1,5 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
+import 'package:user_portal01/services/realtime_service.dart';
 
 class Dashboard extends StatefulWidget {
   const Dashboard({super.key});
@@ -9,85 +13,276 @@ class Dashboard extends StatefulWidget {
 }
 
 class _DashboardState extends State<Dashboard> {
-  final List<Map<String, dynamic>> channels = [
-    {
-      'name': 'Water Utilities',
-      'icon': Icons.water_drop,
-      'color': Colors.blue,
-      'route': '/waterUtilities',
-    },
-    {
-      'name': 'Electricity',
-      'icon': Icons.electrical_services,
-      'color': Colors.yellow,
-      'route': '/electricity',
-    },
-    {
-      'name': 'Health Services',
-      'icon': Icons.local_hospital,
-      'color': Colors.red,
-      'route': '/healthServices',
-    },
-    {
-      'name': 'Police Services',
-      'icon': Icons.local_police,
-      'color': Colors.green,
-      'route': '/policeServices',
-    },
-  ];
+  final _storage = const FlutterSecureStorage();
+  static const String _baseUrl = 'http://10.0.2.2:8081';
+
+  // Realtime service instance
+  late RealtimeService _realtimeService;
+
+  // Dynamic channels
+  List<Map<String, dynamic>> _channels = [];
+  bool _loadingChannels = true;
 
   final ScrollController _scrollController = ScrollController();
   int _selectedIndex = 0;
   int _bottomNavIndex = 0;
 
-  void _scrollToChannel(int index) {
+  // Discussions state
+  List<Map<String, dynamic>> _discussions = [];
+  bool _loadingDiscussions = true;
+  bool _filterByRecent = true;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // 1) Start real-time listener first
+    _realtimeService = RealtimeService(onPostReceived: _onRealtimePostReceived);
+    _realtimeService.connect(
+      baseUrl: 'http://10.0.2.2:8081/ws', // use HTTP for SockJS
+      channelId: 'all',
+    );
+
+    // 2) Load historical data
+    _loadChannels();
+    _loadDiscussions();
+  }
+
+  @override
+  void dispose() {
+    _realtimeService.disconnect();
+    super.dispose();
+  }
+
+  void _onRealtimePostReceived(Map<String, dynamic> post) {
+    final newPost = {
+      'profileImage': post['profileImage'] ?? 'assets/profile_pic.png',
+      'userName': post['userName'] ?? '',
+      'status': post['status'] ?? '',
+      'timePosted': _formatTime(post['timestamp'] ?? ''),
+      'subtitle': post['content'] ?? '',
+      'likeCount': post['likeCount'] ?? 0,
+      'commentCount': post['commentCount'] ?? 0,
+    };
+
     setState(() {
-      _selectedIndex = index;
+      _discussions.insert(0, newPost);
     });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("New post from ${newPost['userName']}"),
+          backgroundColor: Colors.green.shade600,
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'VIEW',
+            textColor: Colors.white,
+            onPressed: () {
+              // optional: scroll to top or highlight
+              _scrollController.animateTo(
+                0,
+                duration: const Duration(milliseconds: 500),
+                curve: Curves.easeOut,
+              );
+            },
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _loadChannels() async {
+    setState(() => _loadingChannels = true);
+    try {
+      final token = await _storage.read(key: 'jwt_token');
+      final uri = Uri.parse('$_baseUrl/channels');
+      final response = await http
+          .get(
+            uri,
+            headers: token != null ? {'Authorization': 'Bearer $token'} : null,
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body) as List;
+        setState(() {
+          _channels = data.map((item) {
+            return {
+              'name': item['name'] ?? '',
+              'icon': _iconFromString(item['icon'] ?? 'category'),
+              'color': _colorFromString(item['color'] ?? 'blue'),
+              'route': item['route'] ?? '',
+            };
+          }).toList();
+          _loadingChannels = false;
+        });
+      } else {
+        setState(() => _loadingChannels = false);
+      }
+    } catch (_) {
+      setState(() => _loadingChannels = false);
+    }
+  }
+
+  Future<void> _loadDiscussions() async {
+    setState(() => _loadingDiscussions = true);
+    try {
+      final token = await _storage.read(key: 'jwt_token');
+      final communityId = await _storage.read(key: 'selected_community_id');
+      if (communityId == null) {
+        // ignore: avoid_print
+        print('⚠️ No community ID saved!');
+        setState(() => _loadingDiscussions = false);
+        return;
+      }
+
+      final channelsUri =
+          Uri.parse('$_baseUrl/communities/$communityId/channels');
+      final channelsRes = await http
+          .get(
+            channelsUri,
+            headers: token != null ? {'Authorization': 'Bearer $token'} : null,
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (channelsRes.statusCode != 200) {
+        setState(() => _loadingDiscussions = false);
+        return;
+      }
+
+      final List channels = json.decode(channelsRes.body);
+      List<Map<String, dynamic>> aggregatedPosts = [];
+
+      for (var channel in channels) {
+        final channelId = channel['id'];
+        final postsUri = Uri.parse('$_baseUrl/channels/$channelId/posts');
+        final postsRes = await http
+            .get(
+              postsUri,
+              headers:
+                  token != null ? {'Authorization': 'Bearer $token'} : null,
+            )
+            .timeout(const Duration(seconds: 10));
+
+        if (postsRes.statusCode == 200) {
+          final List posts = json.decode(postsRes.body);
+          aggregatedPosts.addAll(posts.map((item) => {
+                'profileImage':
+                    item['profileImage'] ?? 'assets/profile_pic.png',
+                'userName': item['userName'] ?? '',
+                'status': item['status'] ?? '',
+                'timePosted': _formatTime(item['timestamp'] ?? ''),
+                'timestamp': item['timestamp'],
+                'subtitle': item['content'] ?? '',
+                'likeCount': item['likeCount'] ?? 0,
+                'commentCount': item['commentCount'] ?? 0,
+              }));
+        }
+      }
+
+      // Sort in frontend
+      if (_filterByRecent) {
+        aggregatedPosts.sort((a, b) => DateTime.parse(b['timestamp'])
+            .compareTo(DateTime.parse(a['timestamp'])));
+      } else {
+        aggregatedPosts.sort((a, b) => (b['likeCount'] + b['commentCount'])
+            .compareTo(a['likeCount'] + a['commentCount']));
+      }
+
+      setState(() {
+        _discussions = aggregatedPosts;
+        _loadingDiscussions = false;
+      });
+    } catch (e) {
+      print("Error loading discussions: $e");
+      setState(() => _loadingDiscussions = false);
+    }
+  }
+
+  String _formatTime(String timestamp) {
+    try {
+      final time = DateTime.parse(timestamp);
+      final diff = DateTime.now().difference(time);
+      if (diff.inHours >= 1) return '${diff.inHours}h ago';
+      if (diff.inMinutes >= 1) return '${diff.inMinutes}m ago';
+      return '${diff.inSeconds}s ago';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  IconData _iconFromString(String iconName) {
+    switch (iconName) {
+      case 'water_drop':
+        return Icons.water_drop;
+      case 'electrical_services':
+        return Icons.electrical_services;
+      case 'local_hospital':
+        return Icons.local_hospital;
+      case 'local_police':
+        return Icons.local_police;
+      default:
+        return Icons.category;
+    }
+  }
+
+  Color _colorFromString(String colorName) {
+    switch (colorName) {
+      case 'blue':
+        return Colors.blue;
+      case 'yellow':
+        return Colors.yellow;
+      case 'red':
+        return Colors.red;
+      case 'green':
+        return Colors.green;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  void _scrollToChannel(int index) {
+    setState(() => _selectedIndex = index);
     _scrollController.animateTo(
-      index * 138.0, // Adjust based on card width + padding
+      index * 138.0,
       duration: const Duration(milliseconds: 500),
       curve: Curves.easeInOut,
     );
   }
 
   void _onBottomNavTap(int index) {
-    if (index == 0) {
-      // Navigate to Explore (dashboard)
-      Navigator.pushNamed(context, '/dashboard');
-    } else if (index == 1) {
-      // Navigate to Channels
-      Navigator.pushNamed(context, '/channels');
-    } else if (index == 2) {
-      // Navigate to Discussions
-      Navigator.pushNamed(context, '/discussion');
-    } else if (index == 3) {
-      // Navigate to Notifications
-      Navigator.pushNamed(context, '/notifications');
-    } else if (index == 4) {
-      // Navigate to Profile
-      Navigator.pushNamed(context, '/profile');
-    } else {
-      setState(() {
-        _bottomNavIndex = index;
-      });
+    setState(() => _bottomNavIndex = index);
+    switch (index) {
+      case 0:
+        Navigator.pushNamed(context, '/dashboard');
+        break;
+      case 1:
+        Navigator.pushNamed(context, '/channels');
+        break;
+      case 2:
+        Navigator.pushNamed(context, '/discussion');
+        break;
+      case 3:
+        Navigator.pushNamed(context, '/notifications');
+        break;
+      case 4:
+        Navigator.pushNamed(context, '/profile');
+        break;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF5874C6),
       body: Stack(
         children: [
-          // Page background image.
-          Positioned.fill(
-            child: Image.asset('assets/Module.png', fit: BoxFit.cover),
-          ),
           SingleChildScrollView(
+            controller: _scrollController,
             child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minHeight: MediaQuery.sizeOf(context).height,
-              ),
+              constraints:
+                  BoxConstraints(minHeight: MediaQuery.of(context).size.height),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -115,64 +310,64 @@ class _DashboardState extends State<Dashboard> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      controller: _scrollController,
-                      child: Row(
-                        children: channels.map((channel) {
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 12.0),
-                            // Wrap with GestureDetector to handle onTap
-                            child: GestureDetector(
-                              onTap: () {
-                                // Navigate to the specified channel page.
-                                Navigator.pushNamed(context, channel['route']);
-                              },
-                              child: Container(
-                                width: 126,
-                                height: 101,
-                                padding: const EdgeInsets.all(8.0),
-                                decoration: BoxDecoration(
-                                  color: channel['color']!.withOpacity(0.8),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Stack(
-                                  children: [
-                                    Align(
-                                      alignment: Alignment.topLeft,
-                                      child: Text(
-                                        channel['name'],
-                                        style: GoogleFonts.sora(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w600,
+                  if (_loadingChannels)
+                    const Center(child: CircularProgressIndicator())
+                  else
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: _channels.map((channel) {
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 12.0),
+                              child: GestureDetector(
+                                onTap: () => Navigator.pushNamed(
+                                    context, channel['route']),
+                                child: Container(
+                                  width: 126,
+                                  height: 101,
+                                  padding: const EdgeInsets.all(8.0),
+                                  decoration: BoxDecoration(
+                                    color: (channel['color'] as Color)
+                                        .withOpacity(0.8),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Stack(
+                                    children: [
+                                      Align(
+                                        alignment: Alignment.topLeft,
+                                        child: Text(
+                                          channel['name'],
+                                          style: GoogleFonts.sora(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                      Align(
+                                        alignment: Alignment.bottomRight,
+                                        child: Icon(
+                                          channel['icon'] as IconData,
+                                          size: 30,
                                           color: Colors.white,
                                         ),
                                       ),
-                                    ),
-                                    Align(
-                                      alignment: Alignment.bottomRight,
-                                      child: Icon(
-                                        channel['icon'],
-                                        size: 30,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
                               ),
-                            ),
-                          );
-                        }).toList(),
+                            );
+                          }).toList(),
+                        ),
                       ),
                     ),
-                  ),
                   const SizedBox(height: 16),
                   Center(
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
-                      children: List.generate(channels.length, (index) {
+                      children: List.generate(_channels.length, (index) {
                         return GestureDetector(
                           onTap: () => _scrollToChannel(index),
                           child: Container(
@@ -190,7 +385,7 @@ class _DashboardState extends State<Dashboard> {
                       }),
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 16),
                   Padding(
                     padding: const EdgeInsets.only(left: 16.0),
                     child: Text(
@@ -224,14 +419,19 @@ class _DashboardState extends State<Dashboard> {
                               padding: const EdgeInsets.only(left: 16.0),
                               child: GestureDetector(
                                 onTap: () {
-                                  // Handle Popularity tap
+                                  setState(() {
+                                    _filterByRecent = true;
+                                    _loadDiscussions();
+                                  });
                                 },
                                 child: Text(
-                                  "Popularity",
+                                  'Recent',
                                   style: GoogleFonts.sora(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,
-                                    color: Colors.white,
+                                    color: _filterByRecent
+                                        ? Colors.white
+                                        : Colors.white.withOpacity(0.8),
                                   ),
                                 ),
                               ),
@@ -240,14 +440,19 @@ class _DashboardState extends State<Dashboard> {
                               padding: const EdgeInsets.only(right: 16.0),
                               child: GestureDetector(
                                 onTap: () {
-                                  // Handle Trending tap
+                                  setState(() {
+                                    _filterByRecent = false;
+                                    _loadDiscussions();
+                                  });
                                 },
                                 child: Text(
-                                  "Trending",
+                                  'Trending',
                                   style: GoogleFonts.sora(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,
-                                    color: Colors.white,
+                                    color: !_filterByRecent
+                                        ? Colors.white
+                                        : Colors.white.withOpacity(0.8),
                                   ),
                                 ),
                               ),
@@ -258,39 +463,31 @@ class _DashboardState extends State<Dashboard> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  // Multiple dynamic profile cards.
-                  const ProfileCard(
-                    profileImage: 'assets/profile_pic.png',
-                    userName: 'John Doe',
-                    status: 'Member',
-                    timePosted: '2h ago',
-                    subtitle:
-                        'This is a dynamic post by John Doe that adjusts based on its content.',
-                    likeCount: 12,
-                    commentCount: 45,
-                  ),
-                  const SizedBox(height: 16),
-                  const ProfileCard2(
-                    profileImage: 'assets/profile_pic.png',
-                    userName: 'Jane Smith',
-                    status: 'Police Officer',
-                    timePosted: '2 minutes ago',
-                    subtitle:
-                        'There has been an accident near Mochudi North Boseja around 5 am!',
-                    likeCount: 12,
-                    commentCount: 2,
-                  ),
-                  const SizedBox(height: 16),
-                  const ProfileCard(
-                    profileImage: 'assets/profile_pic.png',
-                    userName: 'Alice',
-                    status: 'Member',
-                    timePosted: '5h ago',
-                    subtitle: 'Alice posted a new update!',
-                    likeCount: 34,
-                    commentCount: 7,
-                  ),
-                  const SizedBox(height: 16),
+                  if (_loadingDiscussions)
+                    const Center(child: CircularProgressIndicator())
+                  else if (_channels.isEmpty || _discussions.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 24.0),
+                      child: Center(
+                        child: Text(
+                          'No posts available ',
+                          style: GoogleFonts.sora(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    Column(
+                      children: _discussions
+                          .map((discussion) => Padding(
+                                padding: const EdgeInsets.only(bottom: 16.0),
+                                child: DiscussionCard(discussion: discussion),
+                              ))
+                          .toList(),
+                    ),
                 ],
               ),
             ),
@@ -298,43 +495,28 @@ class _DashboardState extends State<Dashboard> {
         ],
       ),
       bottomNavigationBar: ClipRRect(
-        borderRadius: BorderRadius.circular(30),
+        borderRadius: BorderRadius.circular(0.0),
         child: BottomNavigationBar(
           backgroundColor: Colors.white,
           currentIndex: _bottomNavIndex,
           selectedItemColor: Colors.blue,
           unselectedItemColor: Colors.grey,
-          selectedLabelStyle: GoogleFonts.sora(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-          ),
-          unselectedLabelStyle: GoogleFonts.sora(
-            fontSize: 14,
-            fontWeight: FontWeight.normal,
-          ),
+          selectedLabelStyle:
+              GoogleFonts.sora(fontSize: 14, fontWeight: FontWeight.bold),
+          unselectedLabelStyle:
+              GoogleFonts.sora(fontSize: 14, fontWeight: FontWeight.normal),
           type: BottomNavigationBarType.fixed,
           onTap: _onBottomNavTap,
           items: const [
             BottomNavigationBarItem(
-              icon: Icon(Icons.explore),
-              label: 'Explore',
-            ),
+                icon: Icon(Icons.explore), label: 'Explore'),
             BottomNavigationBarItem(
-              icon: Icon(Icons.dashboard),
-              label: 'Channels',
-            ),
+                icon: Icon(Icons.dashboard), label: 'Channels'),
             BottomNavigationBarItem(
-              icon: Icon(Icons.chat),
-              label: 'Discussions',
-            ),
+                icon: Icon(Icons.chat), label: 'Discussions'),
             BottomNavigationBarItem(
-              icon: Icon(Icons.notifications),
-              label: 'Notifications',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person),
-              label: 'Profile',
-            ),
+                icon: Icon(Icons.notifications), label: 'Notifications'),
+            BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
           ],
         ),
       ),
@@ -342,53 +524,39 @@ class _DashboardState extends State<Dashboard> {
   }
 }
 
-class ProfileCard extends StatelessWidget {
-  final String profileImage;
-  final String userName;
-  final String status;
-  final String timePosted;
-  final String subtitle;
-  final int likeCount;
-  final int commentCount;
-
-  const ProfileCard({
-    super.key,
-    required this.profileImage,
-    required this.userName,
-    required this.status,
-    required this.timePosted,
-    required this.subtitle,
-    required this.likeCount,
-    required this.commentCount,
-  });
+class DiscussionCard extends StatelessWidget {
+  final Map<String, dynamic> discussion;
+  const DiscussionCard({super.key, required this.discussion});
 
   @override
   Widget build(BuildContext context) {
-    final ImageProvider imageProvider = profileImage.startsWith('http')
-        ? NetworkImage(profileImage)
-        : AssetImage(profileImage) as ImageProvider;
+    final ImageProvider imageProvider =
+        discussion['profileImage'].toString().startsWith('http')
+            ? NetworkImage(discussion['profileImage'])
+            : AssetImage(discussion['profileImage']) as ImageProvider;
+
+    final statusColors = {
+      'Police Officer': Colors.red,
+      'Member': Colors.green,
+    };
+    final statusColor = statusColors[discussion['status']] ?? Colors.grey;
 
     return Card(
       elevation: 4,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(2),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(2)),
       child: Container(
         width: double.infinity,
         height: 168,
         decoration: BoxDecoration(
           image: const DecorationImage(
-            image: AssetImage('assets/Module.png'),
-            fit: BoxFit.cover,
-          ),
+              image: AssetImage('assets/Module.png'), fit: BoxFit.cover),
           borderRadius: BorderRadius.circular(2),
         ),
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Top row: Profile picture and user details.
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -409,7 +577,7 @@ class ProfileCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        userName,
+                        discussion['userName'],
                         style: GoogleFonts.sora(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
@@ -421,15 +589,13 @@ class ProfileCard extends StatelessWidget {
                         children: [
                           Container(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 4,
-                              vertical: 2,
-                            ),
+                                horizontal: 4, vertical: 2),
                             decoration: BoxDecoration(
-                              color: Colors.green,
+                              color: statusColor,
                               borderRadius: BorderRadius.circular(3),
                             ),
                             child: Text(
-                              status,
+                              discussion['status'],
                               style: GoogleFonts.sora(
                                 fontSize: 10,
                                 color: Colors.white,
@@ -438,11 +604,11 @@ class ProfileCard extends StatelessWidget {
                           ),
                           const SizedBox(width: 8),
                           Container(
-                            width: 53,
+                            width: 100,
                             height: 16,
                             alignment: Alignment.center,
                             child: Text(
-                              timePosted,
+                              discussion['timePosted'],
                               style: GoogleFonts.sora(
                                 fontSize: 11,
                                 color: Colors.white,
@@ -459,7 +625,7 @@ class ProfileCard extends StatelessWidget {
             const SizedBox(height: 12),
             Flexible(
               child: Text(
-                subtitle,
+                discussion['subtitle'],
                 style: GoogleFonts.sora(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -472,241 +638,29 @@ class ProfileCard extends StatelessWidget {
             const SizedBox(height: 5),
             Row(
               children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.favorite,
-                        color: Colors.red,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '$likeCount',
-                        style: GoogleFonts.sora(
-                          fontSize: 14,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.chat_bubble,
-                        color: Colors.white,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '$commentCount Comments',
-                        style: GoogleFonts.sora(
-                          fontSize: 14,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class ProfileCard2 extends StatelessWidget {
-  final String profileImage;
-  final String userName;
-  final String status;
-  final String timePosted;
-  final String subtitle;
-  final int likeCount;
-  final int commentCount;
-
-  const ProfileCard2({
-    super.key,
-    required this.profileImage,
-    required this.userName,
-    required this.status,
-    required this.timePosted,
-    required this.subtitle,
-    required this.likeCount,
-    required this.commentCount,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final ImageProvider imageProvider = profileImage.startsWith('http')
-        ? NetworkImage(profileImage)
-        : AssetImage(profileImage) as ImageProvider;
-
-    return Card(
-      elevation: 4,
-      margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(2),
-      ),
-      child: Container(
-        width: double.infinity,
-        height: 168,
-        decoration: BoxDecoration(
-          image: const DecorationImage(
-            image: AssetImage('assets/Module.png'),
-            fit: BoxFit.cover,
-          ),
-          borderRadius: BorderRadius.circular(2),
-        ),
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 53.12,
-                  height: 58.24,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(5),
-                    image: DecorationImage(
-                      image: imageProvider,
-                      fit: BoxFit.cover,
+                Row(
+                  children: [
+                    const Icon(Icons.favorite, color: Colors.red, size: 18),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${discussion['likeCount']}',
+                      style:
+                          GoogleFonts.sora(fontSize: 14, color: Colors.white),
                     ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        userName,
-                        style: GoogleFonts.sora(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(height: 5),
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 4,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.red,
-                              borderRadius: BorderRadius.circular(3),
-                            ),
-                            child: Text(
-                              status,
-                              style: GoogleFonts.sora(
-                                fontSize: 10,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            width: 100,
-                            height: 16,
-                            alignment: Alignment.center,
-                            child: Text(
-                              timePosted,
-                              style: GoogleFonts.sora(
-                                fontSize: 11,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Flexible(
-              child: Text(
-                subtitle,
-                style: GoogleFonts.sora(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const SizedBox(height: 5),
-            Row(
-              children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.favorite,
-                        color: Colors.red,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '$likeCount',
-                        style: GoogleFonts.sora(
-                          fontSize: 14,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ],
-                  ),
+                  ],
                 ),
                 const SizedBox(width: 16),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.chat_bubble,
-                        color: Colors.white,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '$commentCount Comments',
-                        style: GoogleFonts.sora(
-                          fontSize: 14,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ],
-                  ),
+                Row(
+                  children: [
+                    const Icon(Icons.chat_bubble,
+                        color: Colors.white, size: 16),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${discussion['commentCount']} Comments',
+                      style:
+                          GoogleFonts.sora(fontSize: 14, color: Colors.white),
+                    ),
+                  ],
                 ),
               ],
             ),
