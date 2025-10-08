@@ -1,4 +1,4 @@
-# 🌍 Lefatshe Larona — Flutter User Portal
+# 🌍 Lefatshe Larona —  User Portal
 
 The **Lefatshe Larona User Portal** is a mobile application built with **Flutter** that enables Botswana’s citizens to engage directly with public service providers.  
 It forms part of the broader **Lefatshe Larona Community Platform**, which connects citizens, administrators, and government service providers through real-time digital communication.
